@@ -1,499 +1,284 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>水下机器人</title>
-<link href="style.css" rel="stylesheet" type="text/css" media="all" />
-<script src="jquery-3.2.0.min.js" charset="utf-8" type="text/javascript"></script>
-<script src="echarts.min.js" charset="utf-8" type="text/javascript"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from PIL import Image
+import io
+import torch
+import torch.nn.functional as F
+import torchvision
+import torchvision.transforms.functional as TF
+import base64
+import os
+import yaml
+import numpy as np
+import scipy.io as sio
+import matplotlib.pyplot as plt
+from utils import get_obj_from_string
 
-<style>
-    /* 增强功能开关样式 */
-    .enhancement-toggle {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        z-index: 1000;
-        background: rgba(0, 0, 0, 0.7);
-        padding: 10px 15px;
-        border-radius: 5px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    
-    .enhancement-toggle label {
-        color: #fff;
-        font-size: 14px;
-        margin: 0;
-        cursor: pointer;
-        user-select: none;
-    }
-    
-    .toggle-switch {
-        position: relative;
-        display: inline-block;
-        width: 50px;
-        height: 24px;
-    }
-    
-    .toggle-switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-    
-    .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #ccc;
-        transition: .4s;
-        border-radius: 24px;
-    }
-    
-    .slider:before {
-        position: absolute;
-        content: "";
-        height: 18px;
-        width: 18px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
-    }
-    
-    input:checked + .slider {
-        background-color: #4caf50;
-    }
-    
-    input:checked + .slider:before {
-        transform: translateX(26px);
-    }
-    
-    .enhancement-status {
-        position: absolute;
-        top: 45px;
-        right: 10px;
-        z-index: 999;
-        background: rgba(76, 175, 80, 0.8);
-        color: white;
-        padding: 5px 10px;
-        border-radius: 3px;
-        font-size: 12px;
-        display: none;
-    }
-    
-    .enhancement-status.active {
-        display: block;
-    }
-</style>
+app = Flask(__name__)
+CORS(app)
 
-<body>
-    <div class="wpbox">
-        <div class="bnt">
-            <div class="topbnt_left fl">
-                <ul>
-                    <li class="active"><a href="javascript:void(0)" onclick="window.location.reload();">实例分割</a></li>
-                    <li><a href="#">目标检测</a></li>
-                    <li><a href="#">语义分割</a></li>
-                </ul>
-            </div>
-            <h1 class="tith1 fl">水下机器人</h1>
-            <div class=" fr topbnt_right">
-                <ul>
-                    <li><a href="#">to do</a></li>
-                    <li><a href="#">to do</a></li>
-                    <li class="active"><a href="#">数据分析</a></li>
-                </ul>
-            </div>
-        </div>
-        <!-- bnt end -->
-        <div class="left1" style="width:21%">
-            <div class="aleftboxttop" >
-                <h2 class="tith2">设备电量</h2>
-                <div id="chart-container" style="width: 80%; margin: 10% auto;height: 50%;display: flex;justify-content: center;align-items: center;padding: 0px;">
-                    <canvas id="batteryChart" style="height:100%"></canvas>
-                </div>
-            </div>
-            <div class="aleftboxtmidd">
-                <h2 class="tith2" style="font-family: 'Arial'">实例统计</h2>
-                <div class="lefttoday_tit height ht">
-                    <p class="fl">地区：连心渔港</p>
-                    <p class="fr" id="timePeriod2">时间段：2024-12月</p>
-                </div>
-                <div id="aleftboxtmidd" class="aleftboxtmiddcont">
-                    <canvas id="categoryChart" style="height: 100%;width:100%"></canvas>
-                </div>
-            </div>
-            <div class="aleftboxtbott" style="padding: 0%;width: 97%;" onclick="runInference()">
-                <h2 class="tith2">截图</h2>
-                <img id="snapshot" alt="Captured Snapshot" src="./image_0127.jpg" style="width:90%;height:90%;"/>
-            </div>
-        </div>
-        <!--  left1 end -->
-        <div class="mrbox" style="width:75%;">
-            <div class="mrbox_topmidd" style="width: 68%;margin-top: 3%;">
-                <div class="amiddboxttop" style="text-align: center;height: 80%;position: relative;">
-                    <h2 class="tith2 pt1" style="text-align: center;margin-top: 1.5%;">视频流</h2>
-                    
-                    <!-- 图像增强开关 -->
-                    <div class="enhancement-toggle">
-                        <label for="enhancementToggle">图像增强</label>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="enhancementToggle">
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    
-                    <!-- 增强状态提示 -->
-                    <div class="enhancement-status" id="enhancementStatus">
-                        增强中...
-                    </div>
-                    
-                    <div class="amiddboxttop_map" onclick="captureSnapshot()" style="margin:0.6% 5% 0 5%; width: 90.3%;">
-                        <img id="streamimage1" class="xform" src="./image_0127.jpg" alt="Streaming video 1" style="width: 100%; height: 100%; object-fit: cover; "/>
-                    </div>
-                </div>
-                <!--  amiddboxttop end-->
-            </div>
-            <!-- mrbox_top end -->
-            <div class="mrbox_top_right" style="width:30%">
-                <div class="arightboxtop">
-                    <h2 class="tith2">结果分析</h2>
-                    <div class="lefttoday_tit">
-                        <p class="fl">地区：连心渔港</p>
-                        <p class="fr" id="timePeriod">时间段：2024-12-20</p>
-                    </div>
-                    <div class="zhtc_table_title">
-                        <div>类别</div>
-                        <div>置信度</div>
-                    </div>
-                    <div id="zhtc_table" class="left2_table">
-                        <ul id="segmentation-results" style="max-height: 88%; overflow-y: auto;padding: 10px;list-style-type: none;margin: 0;">
-                            <li>
-                                <div class="zhtc_table_li_content">
-                                    <div>ship_hull</div>
-                                    <div>99.5%</div>
-                                </div>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="arightboxbott" style="text-align: center;">
-                    <h2 class="tith2 ">分割结果</h2>
-                    <img id="imgseg_result" alt="Inference Result" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" style="width:90%;height: 88%;"/>
-                </div>
-            </div>
-            <!-- mrbox_top_right end -->
-        </div>
-    </div>
+# 全局变量
+model = None
+device = None
+config = None
+temp_dir = './temp_uploads'
 
-    <script type="text/javascript">
-        // 全局变量
-        let snapshotBlob = null;
-        let chartInstance = null;
-        let isEnhancementEnabled = false;
-        let currentImagePath = './image_0127.jpg';
+def initialize_model(config_path, checkpoint='best', cuda_id=0):
+    """初始化模型"""
+    global model, device, config
+    
+    # 设置设备
+    device = torch.device(f'cuda:{cuda_id}' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # 加载配置
+    with open(config_path, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    
+    # 创建临时目录
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # 构建模型路径
+    config['model_name'] = config['model_file'].split('.')[1]
+    log_path = f"./exp_results/{config['name']}_{config['model_name']}_lr{config['lr']}_wd{config['weight_decay']}_epoch{config['num_epochs']}_revweight{config['rev_weight']}_Aweight{config['a_weight']}_log/"
+    snapshot_path = os.path.join(log_path, 'weights/')
+    
+    # 加载模型
+    in_channels = 3
+    num_class = 3
+    model = get_obj_from_string(config['model_file'])(
+        in_channels, num_class, img_size=config['img_size']
+    ).to(device)
+    
+    # 加载权重
+    ckpt_map = {
+        'best': 'best_val.pth',
+        'best2': 'best_val2.pth',
+        'musiq': 'best_musiq.pth',
+        'last': 'latest.pth',
+        'p': 'best_psnr_val.pth',
+        's': 'best_ssim_val.pth'
+    }
+    ckpt_file = ckpt_map.get(checkpoint, 'best_val.pth')
+    ckpt_path = os.path.join(snapshot_path, ckpt_file)
+    
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+    
+    ckpt = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(ckpt['net'])
+    model.eval()
+    
+    print(f'Model initialized successfully with checkpoint: {ckpt_file}')
+
+def perform_enhancement(image, resize=0, return_maps=False):
+    """执行图像增强推理"""
+    global model, device
+    
+    # 转换为tensor
+    image_tensor = TF.to_tensor(image).unsqueeze(0)  # Add batch dimension
+    
+    # 存储原始大小
+    _, _, h_orig, w_orig = image_tensor.shape
+    
+    # 调整大小（如果需要）
+    if resize > 0:
+        image_tensor = F.interpolate(
+            image_tensor, size=(resize, resize), mode='bilinear'
+        )
+    
+    image_tensor = image_tensor.to(device)
+    
+    # 推理
+    with torch.no_grad():
+        pred_ = model(image_tensor)
         
-        const categories = [
-            'sea_chest_grating', 'paint_peel', 'over_board_valve', 'defect',
-            'corrosion', 'propeller', 'anode', 'bilge_keel', 'marine_growth', 'ship_hull'
-        ];
+        # 处理不同的输出格式
+        if isinstance(pred_, tuple):
+            pred, D_logits, B_logits, _, _ = pred_
+        else:
+            pred = pred_
+            D_logits = None
+            B_logits = None
         
-        // 监听增强开关变化
-        document.getElementById('enhancementToggle').addEventListener('change', function(e) {
-            isEnhancementEnabled = e.target.checked;
-            console.log('Image enhancement:', isEnhancementEnabled ? 'enabled' : 'disabled');
-            
-            // 如果开启增强，重新处理当前图像
-            if (isEnhancementEnabled) {
-                processWithEnhancement(currentImagePath);
-            } else {
-                // 如果关闭增强，恢复原始图像并重新推理
-                document.getElementById('streamimage1').src = currentImagePath;
-                runInference(currentImagePath, false);
-            }
-        });
+        # 调整回原始大小
+        if resize > 0:
+            pred = F.interpolate(pred, size=(h_orig, w_orig), mode='bilinear')
+            if D_logits is not None:
+                D_logits = F.interpolate(D_logits, size=(h_orig, w_orig), mode='bilinear')
+            if B_logits is not None:
+                B_logits = F.interpolate(B_logits, size=(h_orig, w_orig), mode='bilinear')
+    
+    # 准备返回结果
+    result = {
+        'enhanced_image': pred,
+        'D_map': D_logits,
+        'B_map': B_logits
+    }
+    
+    return result
+
+def tensor_to_base64(tensor):
+    """将tensor转换为base64编码的图像"""
+    # 转换为PIL图像
+    img_np = tensor.squeeze(0).cpu().numpy()
+    img_np = np.transpose(img_np, (1, 2, 0))
+    img_np = (img_np * 255).clip(0, 255).astype(np.uint8)
+    img = Image.fromarray(img_np)
+    
+    # 转换为base64
+    img_io = io.BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+    img_data = base64.b64encode(img_io.read()).decode('utf-8')
+    
+    return img_data
+
+def map_to_base64(tensor):
+    """将传输图转换为base64编码的可视化图像"""
+    if tensor is None:
+        return None
+    
+    # 提取红色通道
+    map_np = tensor.detach().cpu().numpy()[0][0]
+    
+    # 创建可视化
+    plt.figure(figsize=(10, 8))
+    plt.imshow(map_np, cmap='jet')
+    plt.colorbar()
+    plt.axis('off')
+    
+    # 保存到BytesIO
+    img_io = io.BytesIO()
+    plt.savefig(img_io, format='png', bbox_inches='tight', dpi=100)
+    plt.close()
+    
+    img_io.seek(0)
+    img_data = base64.b64encode(img_io.read()).decode('utf-8')
+    
+    return img_data
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """健康检查接口"""
+    return jsonify({
+        'status': 'ok',
+        'model_loaded': model is not None,
+        'device': str(device) if device else 'not initialized'
+    })
+
+@app.route('/enhance', methods=['POST'])
+def enhance_image():
+    """图像增强接口"""
+    try:
+        # 检查模型是否已加载
+        if model is None:
+            return jsonify({'error': 'Model not initialized'}), 500
         
-        window.onload = function() {
-            captureSnapshot(function() {
-                runInference(currentImagePath, false);
-            });
-        };
+        # 检查是否有图像
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image provided'}), 400
         
-        function captureSnapshot(callback) {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', './?action=snapshot', true);
-            xhr.setRequestHeader('Authorization', 'Basic ' + btoa('your_username:your_password'));
-
-            xhr.onload = function () {
-                if (xhr.status === 200) {
-                    snapshotBlob = xhr.response;
-                    const imgUrl = URL.createObjectURL(xhr.response);
-                    document.getElementById('snapshot').src = './image_0127.jpg';
-                    callback();
-                } else {
-                    console.error('Error fetching snapshot:', xhr.status);
-                }
-            };
-
-            xhr.onerror = function () {
-                console.error('Network error');
-            };
-
-            xhr.responseType = 'blob';
-            xhr.send();
+        # 获取参数
+        image_file = request.files['image']
+        resize = int(request.form.get('resize', 0))
+        return_maps = request.form.get('return_maps', 'false').lower() == 'true'
+        
+        # 读取图像
+        image = Image.open(image_file).convert('RGB')
+        
+        print(f'Processing image: {image_file.filename}, size: {image.size}')
+        
+        # 执行推理
+        result = perform_enhancement(image, resize=resize, return_maps=return_maps)
+        
+        # 准备响应
+        response_data = {
+            'status': 'success',
+            'enhanced_image': tensor_to_base64(result['enhanced_image']),
+            'original_size': list(image.size)
         }
         
-        // 图像增强处理函数
-        function processWithEnhancement(imagePath) {
-            // 显示增强状态
-            const statusDiv = document.getElementById('enhancementStatus');
-            statusDiv.classList.add('active');
-            
-            fetch(imagePath)
-                .then(response => response.blob())
-                .then(blob => {
-                    const formData = new FormData();
-                    formData.append('image', blob, 'snapshot.jpg');
-                    formData.append('resize', '0');
-                    formData.append('return_maps', 'false');
-                    
-                    // 调用增强API
-                    return fetch('http://10.142.15.54:5002/enhance', {
-                        method: 'POST',
-                        body: formData
-                    });
+        # 如果需要返回传输图
+        if return_maps:
+            if result['D_map'] is not None:
+                response_data['D_map'] = map_to_base64(result['D_map'])
+            if result['B_map'] is not None:
+                response_data['B_map'] = map_to_base64(result['B_map'])
+        
+        print(f'Enhancement completed successfully')
+        
+        return jsonify(response_data)
+    
+    except Exception as e:
+        print(f'Error during enhancement: {str(e)}')
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/batch-enhance', methods=['POST'])
+def batch_enhance():
+    """批量图像增强接口"""
+    try:
+        if model is None:
+            return jsonify({'error': 'Model not initialized'}), 500
+        
+        # 检查是否有图像
+        if 'images' not in request.files:
+            return jsonify({'error': 'No images provided'}), 400
+        
+        images = request.files.getlist('images')
+        resize = int(request.form.get('resize', 0))
+        
+        results = []
+        
+        for idx, image_file in enumerate(images):
+            try:
+                image = Image.open(image_file).convert('RGB')
+                result = perform_enhancement(image, resize=resize)
+                
+                results.append({
+                    'filename': image_file.filename,
+                    'status': 'success',
+                    'enhanced_image': tensor_to_base64(result['enhanced_image'])
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        // 显示增强后的图像
-                        const enhancedImg = `data:image/png;base64,${data.enhanced_image}`;
-                        document.getElementById('streamimage1').src = enhancedImg;
-                        
-                        // 使用增强后的图像进行分割
-                        runInference(imagePath, true, data.enhanced_image);
-                    } else {
-                        console.error('Enhancement failed:', data.error);
-                        alert('图像增强失败: ' + data.error);
-                    }
-                    
-                    // 隐藏增强状态
-                    statusDiv.classList.remove('active');
+                
+                print(f'Processed {idx + 1}/{len(images)}: {image_file.filename}')
+                
+            except Exception as e:
+                results.append({
+                    'filename': image_file.filename,
+                    'status': 'error',
+                    'error': str(e)
                 })
-                .catch(error => {
-                    console.error('Error during enhancement:', error);
-                    alert('图像增强出错: ' + error.message);
-                    statusDiv.classList.remove('active');
-                });
-        }
         
-        // 修改后的推理函数
-        function runInference(imagePath, useEnhanced, enhancedBase64) {
-            imagePath = imagePath || './image_0127.jpg';
-            
-            // 如果启用增强但还没有增强图像，先进行增强
-            if (isEnhancementEnabled && !useEnhanced) {
-                processWithEnhancement(imagePath);
-                return;
-            }
-            
-            // 准备要发送的图像数据
-            let imagePromise;
-            
-            if (useEnhanced && enhancedBase64) {
-                // 使用增强后的base64图像
-                imagePromise = fetch(`data:image/png;base64,${enhancedBase64}`)
-                    .then(response => response.blob());
-            } else {
-                // 使用原始图像
-                imagePromise = fetch(imagePath)
-                    .then(response => response.blob());
-            }
-            
-            imagePromise
-                .then(blob => {
-                    const formData = new FormData();
-                    formData.append('image', blob, 'snapshot.jpg');
-                    
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', 'http://10.142.15.54:5001/process-snapshot', true);
-                    xhr.responseType = 'json';
-                    
-                    xhr.onload = function () {
-                        if (xhr.status === 200) {
-                            console.log(xhr.response);
-                            const data = xhr.response;
-                            const img = new Image();
-                            img.src = `data:image/jpeg;base64,${data.image_data}`;
-                            document.getElementById('imgseg_result').src = img.src;
-                            
-                            // 更新分割结果表格
-                            const ul = document.getElementById("segmentation-results");
-                            const segResult = data.seg_result;
-                            ul.innerHTML = '';
-                            segResult.labels.forEach((label, index) => {
-                                const category = categories[label];
-                                const li = document.createElement("li");
-                                li.innerHTML = `
-                                    <div class="zhtc_table_li_content">
-                                        <div>${category}</div>
-                                        <div>${(segResult.scores[index] * 100).toFixed(1) + '%'}</div>
-                                    </div>
-                                `;
-                                ul.appendChild(li);
-                            });
-                            
-                            // 统计各类别的总数
-                            const categoryCounts = {};
-                            segResult.labels.forEach(label => {
-                                const category = categories[label];
-                                categoryCounts[category] = (categoryCounts[category] || 0) + 1;
-                            });
-                            
-                            // 准备柱状图数据
-                            const labels = Object.keys(categoryCounts);
-                            const chart_data = Object.values(categoryCounts);
-                            
-                            // 创建柱状图
-                            const ctx = document.getElementById('categoryChart').getContext('2d');
-                            if (chartInstance) {
-                                chartInstance.destroy();
-                            }
-                            chartInstance = new Chart(ctx, {
-                                type: 'bar',
-                                data: {
-                                    labels: labels,
-                                    datasets: [{
-                                        label: '类别计数',
-                                        data: chart_data,
-                                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                                        borderColor: 'rgba(75, 192, 192, 1)',
-                                        borderWidth: 1
-                                    }]
-                                },
-                                options: {
-                                    responsive: true,
-                                    scales: {
-                                        y: {
-                                            beginAtZero: true,
-                                            ticks: {
-                                                color: '#fff',
-                                                font: {
-                                                    size: 12,
-                                                    weight: 'bold'
-                                                }
-                                            }
-                                        },
-                                        x: {
-                                            ticks: {
-                                                color: '#fff',
-                                                font: {
-                                                    size: 10,
-                                                    weight: 'normal'
-                                                }
-                                            }
-                                        }
-                                    },
-                                    plugins: {
-                                        legend: {
-                                            position: 'top',
-                                            labels: {
-                                                color: '#fff',
-                                                font: {
-                                                    size: 12,
-                                                    weight: 'bold'
-                                                }
-                                            },
-                                            onClick: function(event, legendItem) {
-                                                event.stopPropagation();
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        } else {
-                            console.error('Error during inference:', xhr.status, xhr.statusText);
-                        }
-                    };
-                    
-                    xhr.onerror = function () {
-                        console.error('Network error');
-                    };
-                    
-                    xhr.send(formData);
-                })
-                .catch(error => {
-                    console.error("Error fetching image:", error);
-                });
-        }
-        
-        // 电池电量显示
-        let batteryData = {
-            remaining: 100,
-            used: 0
-        };
-        
-        const ctx_battery = document.getElementById('batteryChart').getContext('2d');
-        const batteryChart = new Chart(ctx_battery, {
-            type: 'pie',
-            data: {
-                labels: ['剩余电量', '已用电量'],
-                datasets: [{
-                    data: [batteryData.remaining, batteryData.used],
-                    backgroundColor: ['#4caf50', '#ff6347']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        align: 'center',
-                        labels: {
-                            font: {
-                                size: 14
-                            }
-                        },
-                        onClick: function(event, legendItem) {
-                            event.stopPropagation();
-                        }
-                    }
-                }
-            }
-        });
-        
-        function decreaseBattery() {
-            if (batteryData.remaining > 0) {
-                batteryData.remaining -= 1;
-                batteryData.used = 100 - batteryData.remaining;
-                batteryChart.data.datasets[0].data = [batteryData.remaining, batteryData.used];
-                batteryChart.update();
-            } else {
-                batteryData = {
-                    remaining: 100,
-                    used: 0
-                };
-            }
-        }
-        
-        const batteryInterval = setInterval(decreaseBattery, 1000);
-        
-        // 日期显示
-        const currentDate = new Date();
-        const year = currentDate.getFullYear();
-        const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
-        const day = currentDate.getDate().toString().padStart(2, '0');
-        const formattedDate = `${year}-${month}-${day}`;
-        
-        document.getElementById('timePeriod').textContent = `时间段：${formattedDate}`;
-        document.getElementById('timePeriod2').textContent = `时间段：${year}-${month}月`;
-    </script>
-</body>
-</html>
+        return jsonify({
+            'status': 'completed',
+            'total': len(images),
+            'results': results
+        })
+    
+    except Exception as e:
+        print(f'Error during batch enhancement: {str(e)}')
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Underwater Image Enhancement Server')
+    parser.add_argument('--config', type=str, required=True, help='Path to config file')
+    parser.add_argument('--ckpt', type=str, default='best', help='Checkpoint to use')
+    parser.add_argument('--cuda_id', type=int, default=0, help='CUDA device ID')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='Server host')
+    parser.add_argument('--port', type=int, default=5001, help='Server port')
+    
+    args = parser.parse_args()
+    
+    # 初始化模型
+    print('Initializing model...')
+    initialize_model(args.config, checkpoint=args.ckpt, cuda_id=args.cuda_id)
+    print('Model initialization completed')
+    
+    # 启动服务器
+    print(f'Starting server on {args.host}:{args.port}')
+    app.run(host=args.host, port=args.port, debug=False)
